@@ -1,38 +1,12 @@
 import { useState, useEffect } from "react";
+import { supabase } from "../lib/supabase";
 import { Box, Mail, Lock, ArrowRight, User, Eye, EyeOff } from "lucide-react";
-
-const AUTH_KEY = "fsda.auth.v1";
 
 export interface AuthUser {
   name: string;
   email: string;
 }
 
-function readAuth(): AuthUser | null {
-  try {
-    const raw = localStorage.getItem(AUTH_KEY);
-    return raw ? (JSON.parse(raw) as AuthUser) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeAuth(user: AuthUser | null) {
-  try {
-    if (user) localStorage.setItem(AUTH_KEY, JSON.stringify(user));
-    else localStorage.removeItem(AUTH_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-export function getAuthUser(): AuthUser | null {
-  return readAuth();
-}
-
-export function logout() {
-  writeAuth(null);
-}
 
 export default function LoginPage({ onAuthed }: { onAuthed: (user: AuthUser) => void }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
@@ -47,35 +21,97 @@ export default function LoginPage({ onAuthed }: { onAuthed: (user: AuthUser) => 
     setError("");
   }, [mode]);
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
+  async function handleSubmit(e: React.FormEvent) {
+  e.preventDefault();
+  setError("");
 
-    if (!email.trim() || !email.includes("@")) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters long.");
-      return;
-    }
-    if (mode === "signup" && name.trim().length < 2) {
-      setError("Please enter your name.");
-      return;
-    }
+  const normalizedEmail = email.trim().toLowerCase();
 
-    setLoading(true);
-    // Simulate auth; persist locally so the session survives reloads.
-    setTimeout(() => {
-      const user: AuthUser = {
-        name: mode === "signup" ? name.trim() : email.split("@")[0],
-        email: email.trim(),
-      };
-      writeAuth(user);
-      setLoading(false);
-      onAuthed(user);
-    }, 600);
+  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+    setError("Please enter a valid email address.");
+    return;
   }
+
+  if (password.length < 6) {
+    setError("Password must be at least 6 characters long.");
+    return;
+  }
+
+  if (mode === "signup" && name.trim().length < 2) {
+    setError("Please enter your name.");
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    if (mode === "login") {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+
+      if (error) {
+        setError("Invalid email or password.");
+        return;
+      }
+
+      if (!data.user) {
+        setError("Unable to sign in. Please try again.");
+        return;
+      }
+
+      const authUser: AuthUser = {
+        name:
+          (data.user.user_metadata?.name as string | undefined) ||
+          data.user.email?.split("@")[0] ||
+          "User",
+        email: data.user.email || normalizedEmail,
+      };
+
+      onAuthed(authUser);
+    } else {
+      const { data, error } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password,
+        options: {
+          data: {
+            name: name.trim(),
+          },
+        },
+      });
+
+      if (error) {
+        setError(error.message);
+        return;
+      }
+
+      if (!data.user) {
+        setError("Account creation failed. Please try again.");
+        return;
+      }
+
+      if (!data.session) {
+        setError(
+          "Account created successfully. Please check your email and verify your account before signing in."
+        );
+        setMode("login");
+        return;
+      }
+
+      const authUser: AuthUser = {
+        name: name.trim(),
+        email: data.user.email || normalizedEmail,
+      };
+
+      onAuthed(authUser);
+    }
+  } catch {
+    setError("Something went wrong. Please try again.");
+  } finally {
+    setLoading(false);
+  }
+}
 
   return (
     <div className="min-h-screen flex">
@@ -230,7 +266,7 @@ export default function LoginPage({ onAuthed }: { onAuthed: (user: AuthUser) => 
           </div>
 
           <p className="text-xs text-neutral-400 text-center mt-4">
-            Demo authentication — your session is stored locally in your browser.
+          Secure authentication powered by Supabase.
           </p>
         </div>
       </div>

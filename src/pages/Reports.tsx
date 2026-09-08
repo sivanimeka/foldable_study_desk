@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../App";
 import { Button, Card, EmptyState } from "../components/ui";
 import {
@@ -13,18 +13,42 @@ import {
   User,
 } from "lucide-react";
 import { calculateCost, formatINR, generateRecommendation } from "../lib/designEngine";
-import { MATERIAL_INFO, FINISH_INFO } from "../types";
+import {DesignConfig, MATERIAL_INFO, FINISH_INFO } from "../types";
 
 export default function Reports({ designId }: { designId?: string }) {
   const { currentDesign, savedDesigns, navigate, loadDesign, toast } = useApp();
   const reportRef = useRef<HTMLDivElement>(null);
+  const [loadedDesign, setLoadedDesign] = useState<DesignConfig | null>(null);
 
-  let config = currentDesign;
-  if (designId) {
-    const loaded = loadDesign(designId);
-    if (loaded) config = loaded;
+  useEffect(() => {
+  if (!designId) {
+    setLoadedDesign(null);
+    return;
   }
-  if (!config && savedDesigns.length > 0) config = savedDesigns[0];
+
+  const load = async () => {
+    try {
+      const loaded = await loadDesign(designId);
+      setLoadedDesign(loaded ?? null);
+    } catch (error) {
+      console.error("Failed to load design:", error);
+      setLoadedDesign(null);
+      toast("Unable to load the design.", "error");
+    }
+  };
+
+  void load();
+}, [designId, loadDesign, toast]);
+
+let config = currentDesign;
+
+if (designId && loadedDesign) {
+  config = loadedDesign;
+}
+
+if (!config && savedDesigns.length > 0) {
+  config = savedDesigns[0];
+}
 
   const cost = useMemo(
     () => (config ? calculateCost(config.dimensions, config.material, config.finish, config.storage) : null),

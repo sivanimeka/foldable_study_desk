@@ -19,18 +19,31 @@ export default function MyDesigns() {
   const { savedDesigns, navigate, removeDesign, loadDesign, toast } = useApp();
   const [toDelete, setToDelete] = useState<string | null>(null);
 
-  function handleEdit(id: string) {
-    const d = loadDesign(id);
+  async function handleEdit(id: string) {
+  try {
+    const d = await loadDesign(id);
+
     if (d) {
       navigate({ name: "design", designId: id });
       toast("Design loaded into editor", "info");
     }
+  } catch (error) {
+    console.error("Failed to load design:", error);
+    toast("Unable to load the design.", "error");
   }
+}
+  async function handleView(id: string) {
+  try {
+    const d = await loadDesign(id);
 
-  function handleView(id: string) {
-    loadDesign(id);
-    navigate({ name: "preview", designId: id });
+    if (d) {
+      navigate({ name: "preview", designId: id });
+    }
+  } catch (error) {
+    console.error("Failed to load design:", error);
+    toast("Unable to load the design.", "error");
   }
+}
 
   return (
     <div className="max-w-6xl mx-auto px-4 lg:px-8 py-8 animate-fade-in-up">
@@ -112,10 +125,12 @@ export default function MyDesigns() {
         confirmLabel="Delete"
         danger
         onCancel={() => setToDelete(null)}
-        onConfirm={() => {
-          if (toDelete) removeDesign(toDelete);
-          setToDelete(null);
-        }}
+        onConfirm={async () => {
+  if (toDelete) {
+    await removeDesign(toDelete);
+  }
+  setToDelete(null);
+}}
       />
     </div>
   );

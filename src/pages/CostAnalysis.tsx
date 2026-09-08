@@ -1,20 +1,42 @@
-import { useMemo } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { useApp } from "../App";
+import { DesignConfig, MATERIAL_INFO, FINISH_INFO } from "../types";
 import { Button, Card, EmptyState, Badge } from "../components/ui";
 import { Calculator, AlertCircle, ArrowRight, Info } from "lucide-react";
 import { calculateCost, formatINR } from "../lib/designEngine";
-import { MATERIAL_INFO, FINISH_INFO } from "../types";
-
 export default function CostAnalysis({ designId }: { designId?: string }) {
   const { currentDesign, savedDesigns, navigate, loadDesign } = useApp();
 
-  let config = currentDesign;
-  if (designId) {
-    const loaded = loadDesign(designId);
-    if (loaded) config = loaded;
-  }
-  if (!config && savedDesigns.length > 0) config = savedDesigns[0];
+  const [loadedDesign, setLoadedDesign] = useState<DesignConfig | null>(null);
 
+  useEffect(() => {
+    if (!designId) {
+      setLoadedDesign(null);
+      return;
+    }
+
+    const load = async () => {
+      try {
+        const loaded = await loadDesign(designId);
+        setLoadedDesign(loaded ?? null);
+      } catch (error) {
+        console.error("Failed to load design:", error);
+        setLoadedDesign(null);
+      }
+    };
+
+    void load();
+  }, [designId, loadDesign]);
+
+  let config = currentDesign;
+
+  if (designId && loadedDesign) {
+    config = loadedDesign;
+  }
+
+  if (!config && savedDesigns.length > 0) {
+    config = savedDesigns[0];
+  }
   const cost = useMemo(
     () => (config ? calculateCost(config.dimensions, config.material, config.finish, config.storage) : null),
     [config]

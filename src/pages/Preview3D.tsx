@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "../App";
+import { DesignConfig } from "../types";
 import { Button, Card, Badge, EmptyState } from "../components/ui";
 import Desk3DScene from "../components/Desk3DScene";
 import { createBlankDesign, calculateCost } from "../lib/designEngine";
@@ -21,22 +22,49 @@ export default function Preview3D({ designId }: { designId?: string }) {
   const [view, setView] = useState<ViewName>("free");
   const [resetKey, setResetKey] = useState(0);
   const [showDimensions, setShowDimensions] = useState(true);
+  const [loadedDesign, setLoadedDesign] = useState<DesignConfig | null>(null);
 
-  // Resolve config: explicit design > current > first saved > blank demo
-  let config = currentDesign;
-  if (designId) {
-    const loaded = loadDesign(designId);
-    if (loaded) config = loaded;
+  useEffect(() => {
+  if (!designId) {
+    setLoadedDesign(null);
+    return;
   }
-  if (!config) {
-    if (savedDesigns.length > 0) {
-      config = savedDesigns[0];
-    } else {
-      const blank = createBlankDesign();
-      blank.estimatedCost = calculateCost(blank.dimensions, blank.material, blank.finish, blank.storage).total;
-      config = blank;
+
+  const load = async () => {
+    try {
+      const loaded = await loadDesign(designId);
+      setLoadedDesign(loaded ?? null);
+    } catch (error) {
+      console.error("Failed to load design:", error);
+      setLoadedDesign(null);
+      toast("Unable to load the design.", "error");
     }
+  };
+
+  void load();
+}, [designId, loadDesign, toast]);
+
+// Resolve config: explicit design > current > first saved > blank demo
+let config = currentDesign;
+
+if (designId && loadedDesign) {
+  config = loadedDesign;
+}
+
+if (!config) {
+  if (savedDesigns.length > 0) {
+    config = savedDesigns[0];
+  } else {
+    const blank = createBlankDesign();
+    blank.estimatedCost = calculateCost(
+      blank.dimensions,
+      blank.material,
+      blank.finish,
+      blank.storage
+    ).total;
+    config = blank;
   }
+}
 
   function ensureCurrent() {
     if (!currentDesign && config) {

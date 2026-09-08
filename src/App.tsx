@@ -14,8 +14,8 @@ import CostAnalysis from "./pages/CostAnalysis";
 import Reports from "./pages/Reports";
 import About from "./pages/About";
 import Dashboard from "./pages/Dashboard";
-import LoginPage, { AuthUser, getAuthUser, logout as authLogout } from "./pages/LoginPage";
-
+import LoginPage, { AuthUser } from "./pages/LoginPage";
+import { supabase } from "./lib/supabase";
 export type Route =
   | { name: "home" }
   | { name: "dashboard" }
@@ -33,10 +33,10 @@ interface AppContextType {
   setCurrentDesign: (d: DesignConfig | null) => void;
   updateCurrentDesign: (patch: Partial<DesignConfig>) => void;
   savedDesigns: DesignConfig[];
-  refreshDesigns: () => void;
-  saveCurrent: () => void;
-  removeDesign: (id: string) => void;
-  loadDesign: (id: string) => DesignConfig | undefined;
+  refreshDesigns: () => Promise<void>;
+saveCurrent: () => Promise<void>;
+removeDesign: (id: string) => Promise<void>;
+loadDesign: (id: string) => Promise<DesignConfig | undefined>;
   toast: (message: string, type?: ToastMessage["type"]) => void;
   startNewDesign: () => void;
   user: AuthUser | null;
@@ -61,12 +61,67 @@ function AppProvider() {
   const [savedDesigns, setSavedDesigns] = useState<DesignConfig[]>([]);
   const [toastMsg, setToastMsg] = useState<ToastMessage | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [user, setUser] = useState<AuthUser | null>(() => getAuthUser());
+const [user, setUser] = useState<AuthUser | null>(null);
+const [authLoading, setAuthLoading] = useState(true);
+useEffect(() => {
+  let mounted = true;
 
-  const refreshDesigns = useCallback(() => {
-    setSavedDesigns(listDesigns());
-  }, []);
+  const loadSession = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
+    if (!mounted) return;
+
+    if (session?.user) {
+      setUser({
+        name:
+          (session.user.user_metadata?.name as string | undefined) ||
+          session.user.email?.split("@")[0] ||
+          "User",
+        email: session.user.email || "",
+      });
+    } else {
+      setUser(null);
+    }
+
+    setAuthLoading(false);
+  };
+
+  void loadSession();
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    if (session?.user) {
+      setUser({
+        name:
+          (session.user.user_metadata?.name as string | undefined) ||
+          session.user.email?.split("@")[0] ||
+          "User",
+        email: session.user.email || "",
+      });
+    } else {
+      setUser(null);
+    }
+
+    setAuthLoading(false);
+  });
+
+  return () => {
+    mounted = false;
+    subscription.unsubscribe();
+  };
+}, []);
+  const refreshDesigns = useCallback(async () => {
+  try {
+    const designs = await listDesigns();
+    setSavedDesigns(designs);
+  } catch (error) {
+    console.error("Failed to refresh designs:", error);
+    setSavedDesigns([]);
+  }
+}, []);
   useEffect(() => {
     refreshDesigns();
   }, [refreshDesigns]);
@@ -99,28 +154,53 @@ function AppProvider() {
     setToastMsg({ id: Date.now(), message, type });
   }, []);
 
-  const saveCurrent = useCallback(() => {
-    if (!currentDesign) return;
-    const saved = saveDesign(currentDesign);
+  const saveCurrent = useCallback(async () => {
+  if (!currentDesign) return;
+
+  try {
+    const saved = await saveDesign(currentDesign);
     setCurrentDesignState(saved);
-    refreshDesigns();
+    await refreshDesigns();
     toast("Design saved successfully", "success");
-  }, [currentDesign, refreshDesigns, toast]);
-
-  const removeDesign = useCallback(
-    (id: string) => {
-      deleteDesign(id);
-      refreshDesigns();
+  } catch (error) {
+    console.error("Failed to save design:", error);
+    toast(
+      error instanceof Error ? error.message : "Unable to save the design.",
+      "error"
+    );
+  }
+}, [currentDesign, refreshDesigns, toast]);
+const removeDesign = useCallback(
+  async (id: string) => {
+    try {
+      await deleteDesign(id);
+      await refreshDesigns();
       toast("Design deleted", "info");
-    },
-    [refreshDesigns, toast]
-  );
+    } catch (error) {
+      console.error("Failed to delete design:", error);
+      toast(
+        error instanceof Error ? error.message : "Unable to delete the design.",
+        "error"
+      );
+    }
+  },
+  [refreshDesigns, toast]
+);
+  const loadDesign = useCallback(async (id: string) => {
+  try {
+    const d = await getDesign(id);
 
-  const loadDesign = useCallback((id: string) => {
-    const d = getDesign(id);
-    if (d) setCurrentDesignState(d);
+    if (d) {
+      setCurrentDesignState(d);
+    }
+
     return d;
-  }, []);
+  } catch (error) {
+    console.error("Failed to load design:", error);
+    toast("Unable to load the design.", "error");
+    return undefined;
+  }
+}, [toast]);
 
   const startNewDesign = useCallback(() => {
     const blank = createBlankDesign();
@@ -130,12 +210,18 @@ function AppProvider() {
     navigate({ name: "design" });
   }, [navigate]);
 
-  const logout = useCallback(() => {
-    authLogout();
-    setUser(null);
-    setRoute({ name: "home" });
-    toast("You have been signed out", "info");
-  }, [toast]);
+  const logout = useCallback(async () => {
+  const { error } = await supabase.auth.signOut({ scope: "local" });
+
+  if (error) {
+    toast("Unable to sign out. Please try again.", "error");
+    return;
+  }
+
+  setUser(null);
+  setRoute({ name: "home" });
+  toast("You have been signed out", "info");
+}, [toast]);
 
   const contextValue = useMemo<AppContextType>(
     () => ({
@@ -156,7 +242,15 @@ function AppProvider() {
     }),
     [route, navigate, currentDesign, setCurrentDesign, updateCurrentDesign, savedDesigns, refreshDesigns, saveCurrent, removeDesign, loadDesign, toast, startNewDesign, user, logout]
   );
-
+if (authLoading) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-neutral-50">
+      <div className="text-sm text-neutral-500">
+        Checking your account...
+      </div>
+    </div>
+  );
+}
   if (!user) {
     return (
       <>
